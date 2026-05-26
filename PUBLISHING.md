@@ -97,25 +97,26 @@ riboseek info
 
 ### 5. Create the GitHub release with the full database asset
 
-The 16 K-chain database is hosted as a release asset, not bundled in the
-wheel:
+The 16 K-chain database is hosted **directly on GitHub** as a release
+asset — there is no long-running server behind it. The training A100
+where the database was produced is only the one-time source; once the
+gzip is on GitHub, it is served by GitHub's CDN and the A100 can be
+forgotten.
 
 ```bash
-# Build a gzip-compressed version of the full encoded chain set:
-gzip -9 -k -c \
-    /data2/wangding/projects/RNA3dSeek/data/processed/alphabet_leakfree/encoded_chains.json \
-    > encoded_chains.json.gz
-ls -la encoded_chains.json.gz       # ~10 MB
+# One-time: gzip the database produced by leak-free K-means training.
+gzip -9 -k -c encoded_chains.json > encoded_chains.json.gz
+ls -la encoded_chains.json.gz       # ~10 MB expected
 
-# Then attach it to the v0.1.1 GitHub release:
+# Attach it to the matching GitHub release:
 gh release create v0.1.1 encoded_chains.json.gz \
     --title "RiboSeek 0.1.1" \
-    --notes "First public PyPI release. Full 16,641-chain SA-20 database attached."
+    --notes "Public release. Full 16,641-chain SA-20 database attached."
 ```
 
-The `riboseek download-db` CLI command pulls this asset by URL; the URL
-template in `src/riboseek/cli.py` (`FULL_DB_URL`) is pinned to v0.1.0 —
-**update it** if the asset URL changes.
+The `riboseek download-db` CLI pulls this asset by URL; the URL template
+in `src/riboseek/cli.py` (`FULL_DB_URL`) is pinned to a specific tag —
+**update it** when you cut a new release that ships a new database.
 
 ## Things to double-check before the first PyPI upload
 

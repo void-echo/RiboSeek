@@ -79,9 +79,10 @@ research repository.
 
 If you use RiboSeek in academic work, please cite the preprint:
 
-> RiboSeek: Ultra-fast RNA 3D structure search via spatial-neighbor
-> structural alphabets. *bioRxiv* 2026.04.19.719441.
-> <https://www.biorxiv.org/content/10.64898/2026.04.19.719441v1>
+> Wang D, Jin J, Qiao J, Wei L, Wu S, Liu Q.
+> Spatial-neighbour encoding enables fast RNA 3D structure search.
+> *bioRxiv* 2026.04.19.719441 (2026). doi:
+> [10.64898/2026.04.19.719441](https://doi.org/10.64898/2026.04.19.719441)
 
 ## License
 
