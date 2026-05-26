@@ -1,6 +1,6 @@
 # RiboSeek
 
-**Ultra-fast RNA 3D structure search via spatial-neighbor structural alphabets.**
+**Spatial-neighbour encoding enables fast RNA 3D structure search.**
 
 RiboSeek encodes each RNA 3D structure as a string over a 20-letter
 structural alphabet whose features describe each nucleotide's spatial
