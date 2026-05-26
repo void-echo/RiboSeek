@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "riboseek"
+version = "0.1.0"
+description = "Ultra-fast RNA 3D structure search via spatial-neighbor structural alphabets"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "void-echo", email = "void-echo@outlook.com" },
+]
+keywords = [
+    "RNA",
+    "structural-alphabet",
+    "structure-search",
+    "bioinformatics",
+    "Foldseek",
+    "tertiary-structure",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: C",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "numpy>=1.21",
+    "scipy>=1.7",
+    "scikit-learn>=1.0",
+    "biopython>=1.79",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "build",
+    "twine",
+]
+
+[project.urls]
+Homepage = "https://github.com/void-echo/RiboSeek"
+Repository = "https://github.com/void-echo/RiboSeek"
+Preprint = "https://www.biorxiv.org/content/10.64898/2026.04.19.719441v1"
+Issues = "https://github.com/void-echo/RiboSeek/issues"
+
+[project.scripts]
+riboseek = "riboseek.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+riboseek = [
+    "data/*.npz",
+    "data/*.json",
+    "_native/*.c",
+    "_native/*.h",
+]

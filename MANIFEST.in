@@ -1,0 +1,11 @@
+include LICENSE
+include README.md
+include pyproject.toml
+include setup.py
+recursive-include src/riboseek/_native *.c *.h
+recursive-include src/riboseek/data *.npz *.json
+recursive-include examples *.py *.md
+recursive-include tests *.py
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *.so *.pyd *.dll

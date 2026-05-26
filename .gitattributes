@@ -1,0 +1,9 @@
+# Normalise line endings: LF everywhere in the repo, regardless of OS.
+* text=auto eol=lf
+
+# Binary blobs — never touch.
+*.npz binary
+*.so binary
+*.pyd binary
+*.dll binary
+*.dylib binary
