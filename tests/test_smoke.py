@@ -51,9 +51,14 @@ def test_c_extension_aligns_two_sequences():
     assert same > diff
 
 
+def _demo_db():
+    from riboseek.search import _resolve_demo_db
+    return _resolve_demo_db()
+
+
 def test_searcher_from_pretrained_demo_db():
     from riboseek import Searcher
-    s = Searcher.from_pretrained()
+    s = Searcher.from_pretrained(db=_demo_db())
     assert len(s.encoded_chains) >= 30
     # Take any chain in the db, search for top-3 — must return non-empty
     qkey = next(iter(s.encoded_chains))
@@ -71,7 +76,7 @@ def test_searcher_self_query_is_top_hit():
     rank itself near the top — but we exclude the query when it's a
     known key, so the closest non-self chain should still score high."""
     from riboseek import Searcher
-    s = Searcher.from_pretrained()
+    s = Searcher.from_pretrained(db=_demo_db())
     qkey = next(iter(s.encoded_chains))
     hits = s.search(qkey, top_n=5, prefilter=False)
     assert qkey not in [h["chain"] for h in hits]

@@ -18,9 +18,10 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 
 from .align import NWAligner
-from .alphabet import Alphabet
+from .alphabet import Alphabet, RS80Alphabet
 from .features import pdb_to_features
 from .prefilter import KmerPrefilter
+from . import stats as _stats
 
 PathLike = Union[str, os.PathLike]
 
@@ -68,6 +69,23 @@ class Searcher:
         self._chain_keys = list(encoded_chains.keys())
         self._prefilter_k = prefilter_k
         self._prefilter: Optional[KmerPrefilter] = None
+        self.is_rs80 = isinstance(alphabet, RS80Alphabet)
+        if self.is_rs80:
+            missing = [k for k, v in encoded_chains.items() if "seq" not in v]
+            if missing:
+                raise ValueError(
+                    f"RS-80 search needs the nucleotide sequence of every database chain "
+                    f"('seq' key); {len(missing)} chains lack it. Re-download the database "
+                    f"(riboseek download-db --force) or rebuild it with riboseek build-db, "
+                    f"or use --alphabet sa20.")
+            # database letters in the 80-letter alphabet, built once
+            self._db_labels = {k: RS80Alphabet.join(v["labels"], v["seq"])
+                               for k, v in encoded_chains.items()}
+            self._calibration = _stats.load_calibration("rs80")
+        else:
+            self._db_labels = {k: np.asarray(v["labels"], dtype=np.int32)
+                               for k, v in encoded_chains.items()}
+            self._calibration = None
 
     # ─────────────────────────────────────────────────────────────────
     #  Construction helpers
@@ -76,7 +94,7 @@ class Searcher:
     @classmethod
     def from_pretrained(
         cls,
-        alphabet: str = "sa20",
+        alphabet: str = "rs80",
         db: Optional[PathLike] = None,
         gap_penalty: float = -2.0,
     ) -> "Searcher":
@@ -86,7 +104,8 @@ class Searcher:
         Parameters
         ----------
         alphabet : str
-            Which bundled alphabet to use. Currently ``"sa20"``.
+            ``"rs80"`` (default; structure x base identity, carries E-values)
+            or ``"sa20"`` (= RS-20, geometry only).
         db : path-like, optional
             Path to an encoded-chain JSON file. If omitted, looks for a
             full database under ``~/.cache/riboseek/encoded_chains.json``
@@ -109,7 +128,7 @@ class Searcher:
         if chosen is None or not os.path.exists(chosen):
             raise FileNotFoundError(
                 "No database found. Either run `riboseek download-db` "
-                "to fetch the full 16K-chain database, or pass db=<path>."
+                "to fetch the full 15,391-chain database, or pass db=<path>."
             )
         return cls(alpha, _load_db(chosen), gap_penalty=gap_penalty)
 
@@ -126,19 +145,23 @@ class Searcher:
     #  Encoding
     # ─────────────────────────────────────────────────────────────────
 
-    def encode(self, pdb_or_features, chain_id: Optional[str] = None
-               ) -> np.ndarray:
+    def encode(self, pdb_or_features, chain_id: Optional[str] = None,
+               keep_modified: bool = False) -> np.ndarray:
         """
-        Map an RNA structure to its SA-20 label sequence.
+        Map an RNA structure to its RS-20 (formerly "SA-20") label sequence.
 
         Accepts either a path to a PDB / mmCIF file, or a pre-computed
-        ``(n, 15)`` feature matrix.
+        ``(n, 15)`` feature matrix. ``keep_modified`` folds modified
+        nucleotides onto their parent base instead of dropping them.
         """
         if isinstance(pdb_or_features, (str, os.PathLike, Path)):
-            f = pdb_to_features(str(pdb_or_features), chain_id=chain_id)
-            features = f["features"]
+            f = pdb_to_features(str(pdb_or_features), chain_id=chain_id,
+                                keep_modified=keep_modified)
+            features, seq = f["features"], f["sequence"]
         else:
-            features = np.asarray(pdb_or_features)
+            features, seq = np.asarray(pdb_or_features), ""
+        if self.is_rs80:
+            return self.alphabet.encode(features, seq)
         return self.alphabet.encode(features)
 
     # ─────────────────────────────────────────────────────────────────
@@ -147,9 +170,19 @@ class Searcher:
 
     def _ensure_prefilter(self) -> KmerPrefilter:
         if self._prefilter is None:
-            self._prefilter = KmerPrefilter(self.encoded_chains,
-                                            k=self._prefilter_k)
+            self._prefilter = KmerPrefilter(
+                {k: {"labels": v} for k, v in self._db_labels.items()},
+                k=self._prefilter_k)
         return self._prefilter
+
+    def build_index(self) -> float:
+        """Build the prefilter index now (it is otherwise built lazily on the
+        first search) and return the seconds it took. Call once before a
+        batch of queries so that per-query timings exclude index construction."""
+        import time as _t
+        t0 = _t.time()
+        self._ensure_prefilter()
+        return _t.time() - t0
 
     def search(
         self,
@@ -158,6 +191,7 @@ class Searcher:
         prefilter: bool = True,
         prefilter_candidates: int = 500,
         chain_id: Optional[str] = None,
+        keep_modified: bool = False,
     ) -> List[Dict]:
         """
         Search the database for entries similar to ``query``.
@@ -171,7 +205,7 @@ class Searcher:
             Number of top hits to return.
         prefilter : bool
             Use k-mer prefilter (much faster on large databases). Off by
-            default for small (< 200) databases — turn on for 16K+.
+            default for small (< 200) databases — turn on for 15K+.
         prefilter_candidates : int
             How many candidates the prefilter forwards to alignment.
 
@@ -179,15 +213,15 @@ class Searcher:
         -------
         list of dict, sorted by combined NW+SW score, each with keys
         ``chain``, ``combined_score``, ``nw_score``, ``sw_score``,
-        ``length``.
+        ``evalue`` (RS-80 only; NaN for RS-20), ``length``.
         """
         query_key: Optional[str] = None
         if isinstance(query, str) and query in self.encoded_chains:
             query_key = query
-            q_labels = np.asarray(
-                self.encoded_chains[query]["labels"], dtype=np.int32)
+            q_labels = self._db_labels[query]
         elif isinstance(query, (str, os.PathLike, Path)):
-            q_labels = self.encode(query, chain_id=chain_id).astype(np.int32)
+            q_labels = self.encode(query, chain_id=chain_id,
+                                   keep_modified=keep_modified).astype(np.int32)
         else:
             q_labels = np.asarray(query, dtype=np.int32)
 
@@ -205,8 +239,7 @@ class Searcher:
         nw_scores: List[float] = []
         sw_scores: List[float] = []
         for key in target_keys:
-            t_labels = np.asarray(
-                self.encoded_chains[key]["labels"], dtype=np.int32)
+            t_labels = self._db_labels[key]
             nw_scores.append(self.aligner.align(q_labels, t_labels, local=False))
             sw_scores.append(self.aligner.align(q_labels, t_labels, local=True))
 
@@ -216,13 +249,19 @@ class Searcher:
         sw_z = (sw - sw.mean()) / (sw.std() + 1e-10)
         combined = (nw_z + sw_z) / 2.0
 
+        lengths = np.array([self.encoded_chains[k]["length"] for k in target_keys], dtype=float)
+        if self.is_rs80:
+            ev = _stats.evalue(sw, len(q_labels), lengths, len(self._chain_keys), self._calibration)
+        else:
+            ev = np.full(len(target_keys), np.nan)
         results = [
             {
                 "chain": target_keys[i],
                 "combined_score": float(combined[i]),
                 "nw_score": float(nw[i]),
                 "sw_score": float(sw[i]),
-                "length": int(self.encoded_chains[target_keys[i]]["length"]),
+                "evalue": float(ev[i]),
+                "length": int(lengths[i]),
             }
             for i in range(len(target_keys))
         ]

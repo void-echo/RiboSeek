@@ -48,6 +48,38 @@ _THREE_TO_ONE = {
     "ADE": "A", "CYT": "C", "GUA": "G", "URA": "U",
 }
 _RNA_RESIDUES = set(_THREE_TO_ONE.keys())
+_MODRES_PARENTS = None   # lazily loaded: modified residue name -> parent base (A/C/G/U)
+
+
+def modified_residue_parents() -> dict:
+    """Map of PDB chemical-component ids of modified nucleotides to their parent
+    base (from the CCD ``mon_nstd_parent_comp_id``), e.g. ``{"PSU": "U", "OMG": "G"}``.
+    Used when ``keep_modified=True``."""
+    global _MODRES_PARENTS
+    if _MODRES_PARENTS is None:
+        import importlib.resources as _resources
+        import json as _json
+        with _resources.as_file(
+                _resources.files("riboseek.data").joinpath("modres_parents.json")) as p:
+            _MODRES_PARENTS = _json.load(open(p))
+    return _MODRES_PARENTS
+
+
+def _residue_letter(res, keep_modified: bool = False):
+    """One-letter base for a residue, or None if the residue is not encodable.
+
+    Standard A/C/G/U (and ADE/CYT/GUA/URA) are always accepted. With
+    ``keep_modified`` a hetero residue whose CCD parent is A/C/G/U (pseudouridine,
+    2'-O-methylated bases, m5C, ...) is folded onto that parent instead of being
+    dropped; its base-ring atoms carry the parent's atom names.
+    """
+    name = res.get_resname().strip()
+    het = res.get_id()[0].strip()
+    if not het:
+        return _THREE_TO_ONE.get(name)
+    if keep_modified:
+        return modified_residue_parents().get(name)
+    return None
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -83,8 +115,12 @@ def _is_rna_residue(residue) -> bool:
     return residue.get_resname().strip() in _RNA_RESIDUES
 
 
-def _extract_chain_coords(chain_residues):
-    """Pull P, C4', C1', base centroid, base normal arrays from RNA residues."""
+def _extract_chain_coords(chain_residues, letters=None):
+    """Pull P, C4', C1', base centroid, base normal arrays from RNA residues.
+
+    ``letters`` optionally gives the one-letter base of each residue (used to
+    pick the base-ring atoms); by default it is read from the residue name.
+    """
     n = len(chain_residues)
     P = np.full((n, 3), np.nan)
     C4 = np.full((n, 3), np.nan)
@@ -101,7 +137,7 @@ def _extract_chain_coords(chain_residues):
         if "C1'" in atom_xyz:
             C1[i] = atom_xyz["C1'"]
 
-        resname = _THREE_TO_ONE.get(res.get_resname().strip())
+        resname = letters[i] if letters is not None else _THREE_TO_ONE.get(res.get_resname().strip())
         if resname and resname in _BASE_ATOMS:
             pts = [atom_xyz[a] for a in _BASE_ATOMS[resname] if a in atom_xyz]
             if len(pts) >= 3:
@@ -249,7 +285,8 @@ def _contact_count(C1, contact_dist=CONTACT_DIST, seq_exclude=SEQ_EXCLUDE):
 #  Public API
 # ──────────────────────────────────────────────────────────────────────
 
-def pdb_to_features(path: str, chain_id: Optional[str] = None) -> dict:
+def pdb_to_features(path: str, chain_id: Optional[str] = None,
+                    keep_modified: bool = False) -> dict:
     """
     Parse a PDB / mmCIF file and compute per-residue 15-D structural features.
 
@@ -260,6 +297,11 @@ def pdb_to_features(path: str, chain_id: Optional[str] = None) -> dict:
     chain_id : str, optional
         Chain identifier (e.g. ``"A"``). If omitted, returns features for
         the longest RNA chain in the structure.
+    keep_modified : bool
+        If True, modified nucleotides with an A/C/G/U parent (pseudouridine,
+        2'-O-methylated bases, ...) are kept and treated as the parent base;
+        by default they are dropped, which is how the released database was
+        built.
 
     Returns
     -------
@@ -278,8 +320,7 @@ def pdb_to_features(path: str, chain_id: Optional[str] = None) -> dict:
     chains = []
     for model in structure:
         for chain in model:
-            rna = [r for r in chain if r.get_id()[0].strip() == ""
-                   and _is_rna_residue(r)]
+            rna = [r for r in chain if _residue_letter(r, keep_modified) is not None]
             if len(rna) >= 5:
                 chains.append((chain.get_id(), rna))
         break  # only first model
@@ -298,7 +339,8 @@ def pdb_to_features(path: str, chain_id: Optional[str] = None) -> dict:
     else:
         cid, residues = max(chains, key=lambda c: len(c[1]))
 
-    P, C4, C1, centroids, normals = _extract_chain_coords(residues)
+    letters = [_residue_letter(r, keep_modified) for r in residues]
+    P, C4, C1, centroids, normals = _extract_chain_coords(residues, letters)
 
     d_PP, d_C4, d_C1 = _sequential_distances(P, C4, C1)
     stack = _stacking_angles(normals)
@@ -314,12 +356,13 @@ def pdb_to_features(path: str, chain_id: Optional[str] = None) -> dict:
     feats = np.column_stack(cols).astype(np.float32)
     assert feats.shape[1] == N_FEATURES, feats.shape
 
-    seq = "".join(_THREE_TO_ONE.get(r.get_resname().strip(), "N")
-                  for r in residues)
+    seq = "".join(l or "N" for l in letters)
+    n_modified = sum(1 for r in residues if r.get_id()[0].strip())
 
     return {
         "features": feats,
         "chain_id": cid,
         "length": len(residues),
         "sequence": seq,
+        "n_modified_kept": n_modified,
     }

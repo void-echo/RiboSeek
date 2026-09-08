@@ -13,7 +13,7 @@ See https://github.com/void-echo/RiboSeek for full documentation.
 """
 
 from ._version import __version__
-from .alphabet import Alphabet
+from .alphabet import Alphabet, RS80Alphabet
 from .align import NWAligner
 from .features import pdb_to_features
 from .search import Searcher
@@ -21,6 +21,7 @@ from .search import Searcher
 __all__ = [
     "__version__",
     "Alphabet",
+    "RS80Alphabet",
     "NWAligner",
     "Searcher",
     "pdb_to_features",

@@ -1,0 +1,19 @@
+{
+ "alphabet": "rs80",
+ "score": "sw_score (local score per residue of the shorter chain)",
+ "model": "peaks over threshold on s = S/min(n,m): P = 0.05 exp(-(s - t)/beta); t = a0 + a1 lnL + a2 lnL^2 + a3 ln r + a4 lnL ln r; beta = exp(b0 + b1 lnL + b2 ln r); L = min(n,m), r = max/min",
+ "tail_fraction": 0.05,
+ "theta": [
+  4.920606110706813,
+  -0.8416729361034738,
+  0.06001771423762059,
+  0.03502995142245885,
+  0.0060652840145102305,
+  -0.6772138822546139,
+  -0.4168616871775834,
+  -0.1025331868772685
+ ],
+ "n_null_alignments": 168000,
+ "n_db_calibration": 15391,
+ "source": "scripts/164_evalue_calibration.py (2026-09-08)"
+}

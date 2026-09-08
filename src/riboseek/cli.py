@@ -2,10 +2,12 @@
 Command-line interface for riboseek.
 
 Sub-commands:
-    riboseek encode <pdb>             - print the SA-20 label sequence
+    riboseek encode <pdb>             - print the RS-20 label sequence
     riboseek search <pdb>             - search the bundled / cached database
+    riboseek search --batch <dir>     - search every structure in a directory
     riboseek build-db <dir> -o <out>  - encode a directory of PDBs into a db
-    riboseek download-db              - fetch the full 16K-chain database
+                                        (--append EXISTING to extend a db)
+    riboseek download-db              - fetch the full 15,391-chain database
     riboseek info                     - show version / cache / db status
 """
 
@@ -28,10 +30,11 @@ import numpy as np
 DEFAULT_DB_DIR = Path.home() / ".cache" / "riboseek"
 DEFAULT_DB_PATH = DEFAULT_DB_DIR / "encoded_chains.json"
 
-# GitHub release asset for the full database. Pinned to v0.1.0.
+# GitHub release asset for the full database. v0.2.0 adds the nucleotide
+# sequence of every chain (needed for RS-80 and E-values).
 FULL_DB_URL = (
-    "https://github.com/void-echo/RiboSeek/releases/download/v0.1.0/"
-    "encoded_chains.json.gz"
+    "https://github.com/void-echo/RiboSeek/releases/download/v0.2.0/"
+    "encoded_chains_v2.json.gz"
 )
 
 
@@ -43,7 +46,7 @@ def cmd_encode(args) -> int:
     from .features import pdb_to_features
     from .alphabet import Alphabet
 
-    f = pdb_to_features(args.pdb, chain_id=args.chain)
+    f = pdb_to_features(args.pdb, chain_id=args.chain, keep_modified=args.keep_modified)
     alpha = Alphabet.from_pretrained(args.alphabet)
     labels = alpha.encode(f["features"])
     if args.format == "labels":
@@ -59,40 +62,87 @@ def cmd_encode(args) -> int:
     return 0
 
 
+def _iter_structures(path: str) -> List[Path]:
+    p = Path(path)
+    if p.is_dir():
+        files: List[Path] = []
+        for suffix in ("*.pdb", "*.cif", "*.mmcif", "*.ent", "*.pdb.gz", "*.cif.gz", "*.mmcif.gz", "*.ent.gz"):
+            files.extend(p.glob(suffix))
+        return sorted(files)
+    return [p]
+
+
 def cmd_search(args) -> int:
     from .search import Searcher
 
     print("Loading riboseek search engine...", flush=True)
     t0 = time.time()
-    searcher = Searcher.from_pretrained(
-        alphabet=args.alphabet,
-        db=args.db if args.db != "default" else None,
-    )
+    try:
+        searcher = Searcher.from_pretrained(
+            alphabet=args.alphabet,
+            db=args.db if args.db != "default" else None,
+        )
+    except ValueError as e:
+        if args.alphabet == "rs80" and "seq" in str(e):
+            print(f"  [WARN] {e}\n  Falling back to RS-20 (no E-values).", file=sys.stderr)
+            searcher = Searcher.from_pretrained(
+                alphabet="sa20", db=args.db if args.db != "default" else None)
+        else:
+            raise
+    print(f"  Alphabet: {'RS-80 (structure x base identity)' if searcher.is_rs80 else 'RS-20 (geometry only)'}",
+          flush=True)
     n_db = len(searcher.encoded_chains)
     print(f"  Database: {n_db} chains  (loaded in {time.time() - t0:.2f}s)",
           flush=True)
+    use_prefilter = not args.no_prefilter and n_db > 200
+    if use_prefilter:
+        dt = searcher.build_index()
+        print(f"  Prefilter index built in {dt:.2f}s (once per process)", flush=True)
 
-    print(f"\nQuery: {args.pdb}", flush=True)
-    t0 = time.time()
-    hits = searcher.search(
-        args.pdb,
-        top_n=args.top_n,
-        prefilter=not args.no_prefilter and n_db > 200,
-        prefilter_candidates=args.prefilter_candidates,
-        chain_id=args.chain,
-    )
-    print(f"Search time: {time.time() - t0:.3f}s\n", flush=True)
+    queries = _iter_structures(args.pdb)
+    if not queries:
+        print(f"No structure files found in {args.pdb}", file=sys.stderr)
+        return 2
+    tsv = open(args.tsv, "w") if args.tsv else None
+    if tsv:
+        tsv.write("query\trank\tchain\tcombined\tnw\tsw\tevalue\tlength\n")
 
-    if not hits:
-        print("(no hits)")
-        return 0
+    for q in queries:
+        print(f"\nQuery: {q}", flush=True)
+        t0 = time.time()
+        try:
+            hits = searcher.search(
+                str(q),
+                top_n=args.top_n,
+                prefilter=use_prefilter,
+                prefilter_candidates=args.prefilter_candidates,
+                chain_id=args.chain,
+                keep_modified=args.keep_modified,
+            )
+        except Exception as e:
+            print(f"  [WARN] {q.name}: {e}", file=sys.stderr)
+            continue
+        print(f"Search time: {time.time() - t0:.3f}s "
+              f"({'prefilter + ' if use_prefilter else 'exhaustive '}NW/SW rescoring)\n", flush=True)
 
-    header = f"{'rank':>4}  {'chain':>20}  {'combined':>9}  {'nw':>7}  {'sw':>7}  {'length':>6}"
-    print(header)
-    print("-" * len(header))
-    for i, h in enumerate(hits, 1):
-        print(f"{i:>4}  {h['chain']:>20}  {h['combined_score']:+9.4f}  "
-              f"{h['nw_score']:+7.4f}  {h['sw_score']:+7.4f}  {h['length']:>6d}")
+        if not hits:
+            print("(no hits)")
+            continue
+
+        header = f"{'rank':>4}  {'chain':>20}  {'combined':>9}  {'nw':>7}  {'sw':>7}  {'evalue':>9}  {'length':>6}"
+        print(header)
+        print("-" * len(header))
+        for i, h in enumerate(hits, 1):
+            ev = h.get("evalue", float("nan"))
+            ev_s = f"{ev:9.1e}" if ev == ev else f"{'--':>9}"
+            print(f"{i:>4}  {h['chain']:>20}  {h['combined_score']:+9.4f}  "
+                  f"{h['nw_score']:+7.4f}  {h['sw_score']:+7.4f}  {ev_s}  {h['length']:>6d}")
+            if tsv:
+                tsv.write(f"{q.name}\t{i}\t{h['chain']}\t{h['combined_score']:.4f}\t{h['nw_score']:.4f}\t"
+                          f"{h['sw_score']:.4f}\t{ev:.3e}\t{h['length']}\n")
+    if tsv:
+        tsv.close()
+        print(f"\nWrote {args.tsv}")
     return 0
 
 
@@ -113,19 +163,24 @@ def cmd_build_db(args) -> int:
         print(f"No structure files found in {in_dir}", file=sys.stderr)
         return 2
 
+    encoded = {}
+    if args.append:
+        from .search import _load_db
+        encoded = _load_db(args.append)
+        print(f"Extending {args.append} ({len(encoded)} chains)")
     print(f"Encoding {len(paths)} structures with alphabet '{args.alphabet}'...")
     alpha = Alphabet.from_pretrained(args.alphabet)
-    encoded = {}
     failures = 0
     for i, p in enumerate(paths, 1):
         try:
-            f = pdb_to_features(str(p))
+            f = pdb_to_features(str(p), keep_modified=args.keep_modified)
             labels = alpha.encode(f["features"])
-            key = p.stem.replace(".pdb", "").replace(".cif", "")
+            key = p.stem.replace(".pdb", "").replace(".cif", "").replace(".mmcif", "").replace(".ent", "")
             if f["chain_id"]:
                 key = f"{key}_{f['chain_id']}"
             encoded[key] = {"labels": labels.tolist(),
-                            "length": int(len(labels))}
+                            "length": int(len(labels)),
+                            "seq": f["sequence"]}
         except Exception as e:
             failures += 1
             print(f"  [WARN] {p.name}: {e}", file=sys.stderr)
@@ -141,7 +196,7 @@ def cmd_build_db(args) -> int:
         with open(out_path, "w") as f:
             json.dump(encoded, f)
     print(f"\nWrote {len(encoded)} chains to {out_path}  "
-          f"({failures} failures)")
+          f"({len(paths) - failures} new, {failures} failures)")
     return 0
 
 
@@ -188,7 +243,7 @@ def cmd_info(args) -> int:
     from . import __version__
 
     print(f"riboseek {__version__}")
-    print(f"  bundled alphabets : sa20")
+    print(f"  bundled alphabets : rs80 (default), sa20 (= RS-20)")
     cached = DEFAULT_DB_PATH.exists()
     print(f"  cached full db    : {DEFAULT_DB_PATH}  "
           f"({'present' if cached else 'not downloaded'})")
@@ -217,18 +272,26 @@ def build_parser() -> argparse.ArgumentParser:
                    version=f"riboseek {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    pe = sub.add_parser("encode", help="encode a PDB / mmCIF into SA-20")
+    pe = sub.add_parser("encode", help="encode a PDB / mmCIF into RS-20 letters")
     pe.add_argument("pdb", help="path to .pdb / .cif / .mmcif (optionally .gz)")
     pe.add_argument("--chain", default=None,
                     help="chain id (defaults to longest)")
     pe.add_argument("--alphabet", default="sa20")
     pe.add_argument("--format", choices=("labels", "letters"), default="letters")
+    pe.add_argument("--keep-modified", action="store_true",
+                    help="fold modified nucleotides (PSU, OMG, ...) onto their parent base instead of dropping them")
     pe.set_defaults(func=cmd_encode)
 
     ps = sub.add_parser("search", help="search the database")
-    ps.add_argument("pdb", help="query PDB / mmCIF file")
+    ps.add_argument("pdb", help="query PDB / mmCIF file, or a directory of them (batch mode)")
+    ps.add_argument("--batch", dest="pdb_batch", action="store_true",
+                    help="(implied when PDB is a directory) search every structure file in the directory")
+    ps.add_argument("--tsv", default=None, help="also write all hits to this TSV file")
+    ps.add_argument("--keep-modified", action="store_true",
+                    help="fold modified nucleotides onto their parent base instead of dropping them")
     ps.add_argument("--chain", default=None)
-    ps.add_argument("--alphabet", default="sa20")
+    ps.add_argument("--alphabet", default="rs80", choices=("rs80", "sa20"),
+                    help="rs80 (default: structure x base, with E-values) or sa20 (= RS-20, geometry only)")
     ps.add_argument("--db", default="default",
                     help="path to encoded-chain JSON (defaults to bundled / cached)")
     ps.add_argument("--top-n", type=int, default=10)
@@ -241,9 +304,13 @@ def build_parser() -> argparse.ArgumentParser:
     pb.add_argument("-o", "--output", required=True,
                     help="output JSON path (.json or .json.gz)")
     pb.add_argument("--alphabet", default="sa20")
+    pb.add_argument("--append", default=None, metavar="EXISTING",
+                    help="extend an existing database JSON (new chains are added, same keys replaced)")
+    pb.add_argument("--keep-modified", action="store_true",
+                    help="fold modified nucleotides onto their parent base instead of dropping them")
     pb.set_defaults(func=cmd_build_db)
 
-    pd = sub.add_parser("download-db", help="fetch the full 16K-chain database")
+    pd = sub.add_parser("download-db", help="fetch the full 15,391-chain database")
     pd.add_argument("--force", action="store_true",
                     help="re-download even if cache exists")
     pd.set_defaults(func=cmd_download_db)

@@ -8,7 +8,7 @@ neighborhood (top-3 nearest non-sequential neighbors), then runs
 C-accelerated Needleman–Wunsch / Smith–Waterman alignment to retrieve
 similar structures from a database.
 
-Full-database search against 16K RNA chains takes ~200 ms per query, vs
+Full-database search against 15,391 RNA chains takes ~0.1 s (median) per query, vs
 ~46 h for US-align.
 
 ## Installation
@@ -30,7 +30,7 @@ searcher = Searcher.from_pretrained()
 
 # Encode an RNA structure from a PDB or mmCIF file
 labels = searcher.encode("my_rna.pdb")
-print(f"SA-20 sequence: {labels[:50]}...")
+print(f"RS-20 sequence: {labels[:50]}...")
 
 # Search the database for similar structures
 hits = searcher.search("my_rna.pdb", top_n=10)
@@ -54,16 +54,16 @@ riboseek build-db ./my_pdbs/ -o ./my_db/
 riboseek search my_rna.pdb --db ./my_db/ --top-n 20
 ```
 
-## Full 16K-chain database
+## Full 15,391-chain database
 
 The PyPI package ships with a ~50-chain demo subset so installs stay small.
-For the full 16,641-chain experimental RNA database used in the paper:
+For the full 15,391-chain experimental RNA database used in the paper:
 
 ```bash
 riboseek download-db
 ```
 
-This fetches the full SA-20 encoded chain set (~10 MB compressed) from
+This fetches the full RS-20 encoded chain set (~6 MB compressed) from
 the GitHub release into `~/.cache/riboseek/`. Subsequent `riboseek search`
 calls will use it automatically when `--db default` (the default) is set.
 
