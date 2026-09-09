@@ -67,14 +67,6 @@ This fetches the full RS-20 encoded chain set (~6 MB compressed) from
 the GitHub release into `~/.cache/riboseek/`. Subsequent `riboseek search`
 calls will use it automatically when `--db default` (the default) is set.
 
-## What this package does NOT include
-
-This is a minimal release. It does **not** ship the research scripts
-behind the paper (feature-ablation studies, alternative discretisation
-methods such as VQ-VAE, learned prefilters, RhoFold+-predicted dark-family
-pipeline, figure-rendering code, etc.). Those live in the private
-research repository.
-
 ## Citation
 
 If you use RiboSeek in academic work, please cite the preprint:
