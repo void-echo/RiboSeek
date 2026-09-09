@@ -14,8 +14,7 @@ functions of ``L = min(n, m)`` and ``r = max(n, m) / L``::
     P(score >= s) = 0.05 * exp(-(s - t) / beta)      (clipped to [0, 1])
     E = P * N_db
 
-The coefficients ship in ``riboseek/data/evalue_rs80.json`` and were fitted
-by ``scripts/164_evalue_calibration.py`` of the research repository.
+The coefficients ship in ``riboseek/data/evalue_rs80.json``.
 """
 
 from __future__ import annotations
