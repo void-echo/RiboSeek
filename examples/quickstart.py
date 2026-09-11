@@ -2,7 +2,7 @@
 End-to-end demo of RiboSeek's Python API.
 
 This script picks an arbitrary chain from the bundled demo database,
-re-encodes the query side using its own SA-20 labels, and searches the
+re-encodes the query side with the default RS-80 alphabet, and searches the
 database for similar structures. Use it as a template for your own
 queries from PDB / mmCIF files.
 

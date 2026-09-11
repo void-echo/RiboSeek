@@ -156,7 +156,8 @@ def cmd_build_db(args) -> int:
         return 2
 
     paths: List[Path] = []
-    for suffix in ("*.pdb", "*.cif", "*.mmcif", "*.pdb.gz", "*.cif.gz"):
+    for suffix in ("*.pdb", "*.cif", "*.mmcif", "*.ent",
+                   "*.pdb.gz", "*.cif.gz", "*.mmcif.gz", "*.ent.gz"):
         paths.extend(in_dir.glob(suffix))
     paths.sort()
     if not paths:
@@ -303,7 +304,8 @@ def build_parser() -> argparse.ArgumentParser:
     pb.add_argument("input_dir", help="directory containing .pdb / .cif files")
     pb.add_argument("-o", "--output", required=True,
                     help="output JSON path (.json or .json.gz)")
-    pb.add_argument("--alphabet", default="sa20")
+    pb.add_argument("--alphabet", default="sa20", choices=("sa20",),
+                    help="databases store RS-20 labels plus sequence; RS-80 is derived at search time")
     pb.add_argument("--append", default=None, metavar="EXISTING",
                     help="extend an existing database JSON (new chains are added, same keys replaced)")
     pb.add_argument("--keep-modified", action="store_true",
